@@ -1,6 +1,6 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters, CallbackQueryHandler
-from utils import load_permissions, is_authorized, is_admin, add_user_request, approve_user, reject_user, get_pending_requests, get_all_users, remove_user_approval, search_user_by_id
+from utils import load_permissions, is_authorized, is_admin, add_user_request, approve_user, reject_user, get_pending_requests, get_all_users, remove_user_approval, search_user_by_id, save_permissions
 from recommendation_system import RecommendationSystem
 from symbol_mapper import TIMEFRAMES
 from price_alerts import PriceAlerts
@@ -686,6 +686,61 @@ async def remove_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     else:
         await update.message.reply_text(f"❌ لم يتم العثور على المستخدم `{target_user_id}` في قائمة المعتمدين.", parse_mode='Markdown')
 
+async def add_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """إضافة مستخدم مباشرة عبر معرفه (Admins only)"""
+    user_id = update.effective_user.id
+    if not is_admin(user_id):
+        await update.message.reply_text("🚫 هذا الأمر مخصص للمشرفين فقط.")
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "⚠️ يرجى إدخال معرف المستخدم\n"
+            "**مثال:** `/add_user 123456789`",
+            parse_mode='Markdown'
+        )
+        return
+
+    try:
+        target_user_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("❌ معرف المستخدم يجب أن يكون رقماً.")
+        return
+
+    perms = load_permissions()
+    authorized = perms.get("authorized_users", perms.get("1142810150", []))
+    if target_user_id not in authorized:
+        authorized.append(target_user_id)
+        perms["authorized_users"] = authorized
+        save_permissions(perms)
+
+    await update.message.reply_text(f"✅ تم اعتماد المستخدم `{target_user_id}`.", parse_mode='Markdown')
+
+async def search_telegram_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """إيجاد معرف مستخدم عبر Username باستخدام getChat (Admins only)"""
+    user_id = update.effective_user.id
+    if not is_admin(user_id):
+        await update.message.reply_text("🚫 هذا الأمر مخصص للمشرفين فقط.")
+        return
+
+    if not context.args or not context.args[0].startswith('@'):
+        await update.message.reply_text(
+            "⚠️ يرجى إدخال اسم المستخدم مع @\n"
+            "**مثال:** `/search_telegram @username`",
+            parse_mode='Markdown'
+        )
+        return
+
+    username = context.args[0]
+    try:
+        chat = await context.bot.get_chat(username)
+        await update.message.reply_text(
+            f"🔎 نتيجة البحث:\n\n• Username: `{username}`\n• ID: `{chat.id}`\n\n📝 يمكنك إضافته: `/add_user {chat.id}`",
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        await update.message.reply_text(f"❌ لم أستطع إيجاد المستخدم {username}: {e}")
+
 async def search_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """البحث عن مستخدم"""
     user_id = update.effective_user.id
@@ -750,6 +805,10 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("users", list_all_users))
     app.add_handler(CommandHandler("remove_user", remove_user_command))
     app.add_handler(CommandHandler("search_user", search_user_command))
+
+    # أوامر إدارية إضافية
+    app.add_handler(CommandHandler("add_user", add_user_command))
+    app.add_handler(CommandHandler("search_telegram", search_telegram_command))
     
     # أوامر التنبيهات والتقارير الجديدة
     app.add_handler(CommandHandler("price_alert", price_alert_command))
